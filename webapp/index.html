@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="ru"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Pinch</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<style>
+:root{--bg:#0e1116;--card:#171b22;--tx:#eef1f5;--mut:#8b94a3;--ok:#34d399;--warn:#fbbf24;--bad:#f87171;--acc:#7c9cff}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--tx);font:15px/1.4 -apple-system,system-ui,Segoe UI,Roboto,sans-serif;padding:16px 16px 48px}
+.mut{color:var(--mut)}.card{background:var(--card);border-radius:18px;padding:16px;margin-bottom:12px}
+.top{display:flex;justify-content:space-between;align-items:center}
+select,input,button{font:inherit;color:var(--tx);background:#232a35;border:0;border-radius:10px;padding:8px 10px}
+button{cursor:pointer}.big{font-size:34px;font-weight:700;margin:4px 0 12px}
+.ring{display:flex;flex-direction:column;align-items:center}
+.ring svg{width:180px;height:180px;transform:rotate(-90deg)}
+.ringtx{position:absolute;text-align:center}.rw{position:relative;display:flex;align-items:center;justify-content:center}
+.tabs{display:flex;gap:8px;margin-bottom:12px}.tabs button{flex:1;padding:10px}.tabs .on{background:var(--acc);color:#0e1116;font-weight:600}
+.row{display:flex;justify-content:space-between;gap:8px;margin:10px 0 4px}
+.bar{height:8px;border-radius:6px;background:#232a35;overflow:hidden}.bar i{display:block;height:100%;background:var(--acc);border-radius:6px}
+.up{color:var(--bad)}.down{color:var(--ok)}
+.day{margin:14px 0 6px;color:var(--mut);font-size:13px}
+.tx{display:flex;align-items:center;gap:10px;padding:8px 0}.tx .i{font-size:22px}.tx .m{flex:1;min-width:0}
+.tx .m div{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.inc{color:var(--ok)}
+.x{background:none;color:var(--mut);padding:4px 8px}
+.set{display:flex;gap:8px;margin-top:8px}.set input{flex:1;min-width:0}
+</style></head><body>
+<div id="err" class="mut"></div>
+<div class="card">
+  <div class="top"><span class="mut">Баланс</span><select id="cur"></select></div>
+  <div class="big" id="bal">…</div>
+  <div class="rw ring"><svg viewBox="0 0 120 120"><circle cx="60" cy="60" r="52" fill="none" stroke="#232a35" stroke-width="12"/><circle id="arc" cx="60" cy="60" r="52" fill="none" stroke="#34d399" stroke-width="12" stroke-linecap="round" stroke-dasharray="326.7" stroke-dashoffset="326.7" style="transition:all .6s"/></svg>
+  <div class="ringtx"><div class="mut" id="rl"></div><div style="font-size:22px;font-weight:700" id="rv"></div></div></div>
+</div>
+<div class="tabs"><button id="pw">Неделя</button><button id="pm" class="on">Месяц</button></div>
+<div class="card"><div id="ins"></div><div id="cats"></div></div>
+<div class="card"><b>История</b><div id="hist"></div></div>
+<div class="card"><b>Лимит на месяц</b><div class="mut" id="lh" style="font-size:13px"></div>
+  <div class="set"><input id="lim" type="number" inputmode="decimal" placeholder="Сумма"><button id="sv">Сохранить</button></div>
+  <div class="set"><button id="mk" style="flex:1">Сделать валюту основной</button></div></div>
+<script>
+const tg=window.Telegram&&Telegram.WebApp;if(tg){tg.ready();tg.expand()}
+const $=id=>document.getElementById(id);
+const SYM={RUB:'₽',USD:'$',EUR:'€',KZT:'₸',UAH:'₴',GBP:'£',TRY:'₺'};
+let cur=localStorage.getItem('cur')||'',period='month',last=null;
+const fmt=(v,c)=>new Intl.NumberFormat('ru-RU',{maximumFractionDigits:0}).format(v)+' '+(SYM[c]||c);
+const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+async function api(p,o={}){const r=await fetch(p,{...o,headers:{'X-Init-Data':tg?tg.initData:'','Content-Type':'application/json'}});if(!r.ok)throw new Error(r.status);return r.json()}
+const sel=$('cur');Object.keys(SYM).forEach(c=>sel.add(new Option(c,c)));
+sel.onchange=()=>{cur=sel.value;localStorage.setItem('cur',cur);load()};
+$('pw').onclick=()=>setP('week');$('pm').onclick=()=>setP('month');
+function setP(p){period=p;$('pw').className=p=='week'?'on':'';$('pm').className=p=='month'?'on':'';load()}
+async function load(){
+  try{
+    const q=cur?'&cur='+cur:'';
+    const [s,t]=await Promise.all([api('/api/summary?period='+period+q),api('/api/transactions?limit=60'+q)]);
+    cur=s.currency;sel.value=cur;last=s;$('err').textContent='';render(s,t)
+  }catch(e){$('err').textContent='Не удалось загрузить. Открой приложение через кнопку меню в боте.'}
+}
+function render(s,t){
+  $('bal').textContent=fmt(s.balance,s.currency);
+  const arc=$('arc');
+  if(s.limit){
+    const f=Math.min(Math.max(s.month_spent/s.limit,0),1);
+    arc.style.strokeDashoffset=326.7*(1-f);
+    arc.style.stroke=f<.7?'#34d399':f<1?'#fbbf24':'#f87171';
+    $('rl').textContent=s.remaining>=0?'осталось':'перерасход';$('rv').textContent=fmt(Math.abs(s.remaining),s.currency);
+    $('lh').textContent='Сейчас: '+fmt(s.limit,s.currency)+' (потрачено в этом месяце '+fmt(s.month_spent,s.currency)+')';
+  }else{
+    arc.style.strokeDashoffset=326.7;$('rl').textContent='лимит не задан';$('rv').textContent='—';
+    $('lh').textContent='Задай лимит, чтобы видеть остаток за месяц';
+  }
+  $('ins').innerHTML='<div style="margin-bottom:6px">'+esc(s.insight)+'</div>';
+  const mx=Math.max(1,...s.categories.map(c=>c.amount));
+  $('cats').innerHTML=s.categories.map(c=>{
+    const ch=c.change==null?'':`<span class="${c.change>0?'up':'down'}">${c.change>0?'▲':'▼'} ${Math.abs(c.change).toFixed(0)}%</span>`;
+    return `<div class="row"><span>${c.icon} ${esc(c.title)}</span><span>${fmt(c.amount,s.currency)} ${ch}</span></div><div class="bar"><i style="width:${c.amount/mx*100}%"></i></div>`}).join('')||'<div class="mut">Пока пусто</div>';
+  let day='',h='';
+  t.forEach(x=>{
+    const d=new Date(x.created_at).toLocaleDateString('ru-RU',{day:'numeric',month:'long'});
+    if(d!==day){day=d;h+=`<div class="day">${d}</div>`}
+    const inc=x.kind=='income',other=x.currency!==s.currency?`<div class="mut" style="font-size:12px">≈ ${fmt(x.converted,s.currency)}</div>`:'';
+    h+=`<div class="tx"><span class="i">${x.icon}</span><div class="m"><div>${esc(x.note||x.title)}</div><div class="mut" style="font-size:12px">${esc(x.title)}</div></div><div style="text-align:right"><div class="${inc?'inc':''}">${inc?'+':'−'}${fmt(x.amount,x.currency)}</div>${other}</div><button class="x" onclick="del(${x.id})">✕</button></div>`;
+  });
+  $('hist').innerHTML=h||'<div class="mut" style="margin-top:8px">Операций пока нет</div>';
+}
+async function del(id){if(!confirm('Удалить запись?'))return;await api('/api/transactions/'+id,{method:'DELETE'});load()}
+$('sv').onclick=async()=>{const v=parseFloat($('lim').value);if(!(v>=0))return;
+  await api('/api/settings',{method:'POST',body:JSON.stringify({base_currency:cur,monthly_limit:v})});$('lim').value='';load()};
+$('mk').onclick=async()=>{await api('/api/settings',{method:'POST',body:JSON.stringify({base_currency:cur})});load()};
+load();
+</script></body></html>
