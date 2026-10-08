@@ -94,14 +94,14 @@ async def record(m: Message, text: str):
 
 @router.message(F.voice)
 async def voice(m: Message):
-    if not config.GROQ_API_KEY:
-        return await m.answer("Голос не настроен: добавь GROQ_API_KEY. Пока пиши текстом или диктуй через клавиатуру.")
+    if not config.STT_ENABLED:
+        return await m.answer("Голос не настроен: добавь GEMINI_API_KEY. Пока пиши текстом или диктуй через клавиатуру.")
     f = await bot.get_file(m.voice.file_id)
     buf = await bot.download_file(f.file_path)
     try:
         text = await stt.transcribe(buf.read())
-    except Exception:
-        return await m.answer("Не получилось распознать голос, попробуй ещё раз или напиши текстом.")
+    except Exception as e:
+        return await m.answer(f"Не получилось распознать голос, попробуй ещё раз или напиши текстом.\n<code>{str(e)[:180]}</code>")
     await m.answer(f"🎙 «{text}»")
     await record(m, text)
 
