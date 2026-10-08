@@ -23,7 +23,7 @@ async def summarize(user, cur: str, period: str) -> dict:
     days = 7 if period == "week" else 30
     t0, t1 = now - timedelta(days=days), now - timedelta(days=2 * days)
     m0 = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-    balance = income = spent = prev_spent = month_spent = 0.0
+    balance = income = prev_income = spent = prev_spent = month_spent = 0.0
     cats, prev, meta = defaultdict(float), defaultdict(float), {}
     spend, inc = [0.0] * days, [0.0] * days
     for r in await db.all_tx(user["id"]):
@@ -34,6 +34,8 @@ async def summarize(user, cur: str, period: str) -> dict:
             balance += v
             if d >= t0:
                 income += v
+            elif d >= t1:
+                prev_income += v
             if 0 <= di < days:
                 inc[di] += v
             continue
@@ -60,14 +62,13 @@ async def summarize(user, cur: str, period: str) -> dict:
     limit = None
     if user["monthly_limit"] is not None:
         limit = rates.convert(rt, user["monthly_limit"], user["base_currency"], cur)
-    # баланс на конец каждого дня (от старого к новому) для мини-графика
     bal_end, acc = [], balance
     for i in range(days):
         bal_end.append(acc)
         acc -= inc[i] - spend[i]
     return dict(
-        currency=cur, balance=balance, income=income, spent=spent, prev_spent=prev_spent,
-        month_spent=month_spent, limit=limit,
+        currency=cur, balance=balance, income=income, prev_income=prev_income, spent=spent,
+        prev_spent=prev_spent, month_spent=month_spent, limit=limit,
         remaining=None if limit is None else limit - month_spent,
         categories=items, insight=_insight(items, spent),
         series=[dict(spent=spend[i], income=inc[i]) for i in reversed(range(days))],
