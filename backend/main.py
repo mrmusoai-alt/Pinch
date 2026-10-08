@@ -1,3 +1,4 @@
+import asyncio
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -6,9 +7,10 @@ from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
-from . import auth, config, db, rates, stats
+from . import auth, config, db, extras, rates, stats
 from .bot import bot, dp
 
+dp.include_router(extras.router)
 INDEX = Path(__file__).parent.parent / "webapp" / "index.html"
 
 
@@ -20,7 +22,10 @@ async def lifespan(app: FastAPI):
         await bot.set_chat_menu_button(
             menu_button=MenuButtonWebApp(text="Pinch", web_app=WebAppInfo(url=config.BASE_URL))
         )
+    await bot.set_my_commands(extras.COMMANDS)
+    task = asyncio.create_task(extras.scheduler())
     yield
+    task.cancel()
     await bot.session.close()
 
 
