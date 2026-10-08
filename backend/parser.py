@@ -20,6 +20,52 @@ CATS = {
     "health": r"аптек|лекарств|врач|стоматолог|анализ|здоровь|больниц|таблетк",
 }
 NUM = re.compile(r"(\d+(?:[ \u00a0]\d{3})*(?:[.,]\d+)?)\s*(к|k|тыс\w*)?(?![а-яёa-z])", re.I)
+FILL = re.compile(
+    r"\b(?:потратил\w*|купил\w*|заплатил\w*|отдал\w*|вчера|сегодня|ну|так|значит|еще|ещё|и|в|на|за|по)\b", re.I
+)
+SEP = re.compile(
+    r"[,;]|\b(?:и|потом|еще|ещё|плюс|также|вчера|потратил\w*|купил\w*|заплатил\w*|получил\w*|заработал\w*)\b", re.I
+)
+CURW = re.compile(r"\s*(?:" + "|".join(p for _, p in CUR) + r")\w*", re.I)
+
+
+def split(text: str) -> list[str]:
+    """Разбивает одну строку «кофе 350 такси 500» на отдельные покупки."""
+    ms = list(NUM.finditer(text))
+    if len(ms) < 2:
+        return [text]
+    lead = FILL.sub("", text[: ms[0].start()])
+    if not re.search(r"[а-яёa-z]", lead, re.I):
+        # «потратил 300 на кофе 500 на такси»: сначала сумма, потом описание
+        cut = [0]
+        for a, b in zip(ms, ms[1:]):
+            gap = text[a.end() : b.start()]
+            c = CURW.match(gap)
+            s = SEP.search(gap, c.end() if c else 0)
+            cut.append(a.end() + (s.start() if s else len(gap)))
+        cut.append(len(text))
+        return [text[cut[i] : cut[i + 1]] for i in range(len(ms))]
+    # «кофе 350 такси 500»: сначала описание, потом сумма
+    out, start = [], 0
+    for m in ms:
+        end = m.end()
+        c = CURW.match(text, end)
+        if c:
+            end = c.end()
+        out.append(text[start:end])
+        start = end
+    if text[start:].strip():
+        out[-1] += text[start:]
+    return out
+
+
+def parse_many(text: str, default_cur: str) -> list[dict]:
+    res = []
+    for chunk in split(text):
+        p = parse(chunk.strip(" ,;.\n"), default_cur)
+        if p:
+            res.append(p)
+    return res
 
 
 def parse(text: str, default_cur: str):

@@ -33,8 +33,9 @@ async def start(m: Message):
     await db.get_user(m.from_user.id)
     await m.answer(
         "Привет! Я <b>Pinch</b> — считаю твои деньги.\n\n"
-        "Пиши или наговаривай голосом:\n"
+        "Пиши или наговаривай, можно сразу несколько трат:\n"
         "• <code>кофе 350</code>\n• <code>такси 500 рублей</code>\n"
+        "• <code>кофе 350 такси 500 обед 700</code>\n"
         "• <code>получил зарплату 80000</code>\n• <code>20 долларов подписка</code>\n\n"
         "Открой приложение кнопкой меню внизу слева.\n"
         "Команды: /currency USD — основная валюта, /limit 50000 — лимит на месяц (/limit 0 — убрать)"
@@ -71,26 +72,30 @@ async def limit(m: Message):
 
 async def record(m: Message, text: str):
     user = await db.get_user(m.from_user.id)
-    p = parser.parse(text, user["base_currency"])
-    if not p:
+    items = parser.parse_many(text, user["base_currency"])[:10]
+    if not items:
         return await m.answer("Не нашёл сумму. Например: <code>кофе 350</code>")
-    row = await db.add_tx(user["id"], **p)
+    rows = [await db.add_tx(user["id"], **p) for p in items]
+    lines = []
+    if len(items) > 1:
+        lines.append(f"✅ Записано: {len(items)}")
+    for p, r in zip(items, rows):
+        sign = "➕" if p["kind"] == "income" else "➖"
+        lines.append(f"{sign} <b>{money(p['amount'], p['currency'])}</b> · {r['icon']} {r['title']}")
     s = await stats.summarize(user, user["base_currency"], "month")
-    head = "➕ Доход" if p["kind"] == "income" else "➖ Расход"
-    lines = [f"{head}: <b>{money(p['amount'], p['currency'])}</b>", f"{row['icon']} {row['title']}"]
     lines.append(f"Баланс: {money(s['balance'], s['currency'])}")
     if s["remaining"] is not None:
         lines.append(f"Осталось по лимиту: {money(s['remaining'], s['currency'])}")
-    kb = InlineKeyboardMarkup(
-        inline_keyboard=[[InlineKeyboardButton(text="↩️ Отменить", callback_data=f"del:{row['id']}")]]
-    )
+    ids = ",".join(str(r["id"]) for r in rows)
+    label = "↩️ Отменить всё" if len(rows) > 1 else "↩️ Отменить"
+    kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text=label, callback_data=f"del:{ids}")]])
     await m.answer("\n".join(lines), reply_markup=kb)
 
 
 @router.message(F.voice)
 async def voice(m: Message):
     if not config.GROQ_API_KEY:
-        return await m.answer("Голос не настроен: добавь GROQ_API_KEY. Пока пиши текстом.")
+        return await m.answer("Голос не настроен: добавь GROQ_API_KEY. Пока пиши текстом или диктуй через клавиатуру.")
     f = await bot.get_file(m.voice.file_id)
     buf = await bot.download_file(f.file_path)
     try:
@@ -109,6 +114,8 @@ async def text(m: Message):
 @router.callback_query(F.data.startswith("del:"))
 async def undo(cb: CallbackQuery):
     user = await db.get_user(cb.from_user.id)
-    await db.delete_tx(user["id"], int(cb.data[4:]))
-    await cb.message.edit_text("↩️ Запись отменена")
+    ids = [int(x) for x in cb.data[4:].split(",") if x.isdigit()]
+    for i in ids:
+        await db.delete_tx(user["id"], i)
+    await cb.message.edit_text(f"↩️ Отменено записей: {len(ids)}")
     await cb.answer()
